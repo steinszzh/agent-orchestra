@@ -1,10 +1,35 @@
 # 🎼 Agent Orchestra
 
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Status](https://img.shields.io/badge/status-hobby%2F%23-lightgrey)
+![Tests](https://img.shields.io/badge/tests-30%2B%20passed-brightgreen)
+
 一个轻量级、**零依赖**的多智能体编排框架，用 Python 实现。
 
 支持多种编排模式：顺序流水线、并行扇出、路由分发、层级委派、辩论、以及声明式 DAG 工作流。
 
 > 开箱即用：内置 `MockBackend` 让你在没有 API Key 的情况下也能完整运行和测试。接入真实 LLM 只需实现一个 `LLMBackend` 接口。
+
+---
+
+## 🤔 Why
+
+已经有 LangGraph、CrewAI、AutoGen 了，为什么再造一个？
+
+- **零依赖**：不依赖任何第三方库（仅测试用 pytest），pip install 即可跑，没有依赖地狱
+- **教学/原型导向**：代码精简、模式清晰，适合理解多智能体编排的核心概念，也适合快速验证想法
+- **轻量内聚**：核心 6 个模块，每个职责单一，改一个模式不影响其他
+- **MockBackend**：离线可跑完整流程，接入真实 LLM 时只换一行代码
+
+**不是什么**：不是 LangGraph 的替代品，不适合生产级高并发场景。
+
+---
+
+## 📋 Prerequisites
+
+- Python **3.10+**
+- 无外部运行依赖（`pip install -e .` 仅安装包元数据）
 
 ---
 
@@ -37,7 +62,7 @@ pip install -e .          # 可编辑安装
 pip install -e ".[test]"
 ```
 
-无需安装即可直接运行（Python 3.10+）：
+无需安装即可直接运行：
 
 ```bash
 python examples/demo.py
@@ -123,6 +148,35 @@ wf = (
 results = engine.run(wf, Task("写一份 Python 装饰器指南。"))
 print(results["review"].content)
 ```
+
+---
+
+## 🎬 Demo 输出示例
+
+```
+======================================================================
+  1. SEQUENTIAL PIPELINE  (researcher -> writer -> analyst)
+======================================================================
+...
+[sequential step 2] analyst -> sequential-team
+Analysis:
+- Strengths: clarity, structure.
+- Weaknesses: needs more evidence.
+- Verdict: APPROVE with minor revisions.
+
+======================================================================
+  3. ROUTER  (router picks the best agent for each task)
+======================================================================
+--- Task: Debug a Python function that throws KeyError.
+Routed to: coder
+--- Task: Write a blog post intro about space exploration.
+Routed to: writer
+--- Task: Analyze the strengths of this marketing copy.
+Routed to: analyst
+  DONE — all patterns executed successfully ✅
+```
+
+> 完整运行：`python examples/demo.py`（无需 API Key，30 秒内完成）
 
 ---
 
@@ -289,13 +343,11 @@ python -m pytest tests/ -v
 python tests/test_orchestra.py
 ```
 
-## 🎬 演示
+---
 
-```bash
-python examples/demo.py
-```
+## 📅 Roadmap
 
-演示会依次运行全部 6 种编排模式并打印输出。
+> Coming soon. 这个项目目前处于 v0.1.0 的早期阶段，后续计划将在这里更新。
 
 ---
 
