@@ -16,7 +16,9 @@ import sys
 from pathlib import Path
 
 # Make the package importable when running the file directly.
-ROOT = Path(__file__).resolve().parent.parent
+# demo.py lives inside the package (agent_orchestra/examples/), so the
+# repository root is three levels up.
+ROOT = Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -60,6 +62,7 @@ def demo_sequential() -> None:
     results = orch.run_sequential(task, ["researcher", "writer", "analyst"])
     show("sequential", results)
     print(f"\nTotal messages in memory: {len(orch.memory.history)}")
+    orch.shutdown()
 
 
 def demo_parallel() -> None:
@@ -75,6 +78,7 @@ def demo_parallel() -> None:
         aggregator="planner",
     )
     show("parallel", results)
+    orch.shutdown()
 
 
 def demo_router() -> None:
@@ -120,6 +124,7 @@ def demo_router() -> None:
         )
         print(f"Routed to: {result.sender}")
         print(result.content)
+    orch.shutdown()
 
 
 def demo_hierarchical() -> None:
@@ -153,6 +158,7 @@ def demo_hierarchical() -> None:
         worker_ids=["researcher", "coder", "analyst"],
     )
     show("hierarchical-final", final)
+    orch.shutdown()
 
 
 def demo_debate() -> None:
@@ -169,6 +175,7 @@ def demo_debate() -> None:
         judge_agent="judge",
     )
     show("debate-verdict", verdict)
+    orch.shutdown()
 
 
 def demo_workflow_dag() -> None:
@@ -191,6 +198,7 @@ def demo_workflow_dag() -> None:
         m = results[step_id]
         print(f"\n[workflow:{step_id}] {m.sender}")
         print(m.content)
+    engine.shutdown()
 
 
 def main() -> None:

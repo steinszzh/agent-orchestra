@@ -26,10 +26,12 @@ from .core import (
     Message,
     MessageRole,
     MockBackend,
+    OpenAIBackend,
     Orchestrator,
     ScriptedBackend,
     Step,
     Task,
+    Tool,
     Workflow,
     WorkflowEngine,
 )
@@ -44,7 +46,7 @@ from .agents import (
     create_default_team,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     # Core
@@ -55,10 +57,12 @@ __all__ = [
     "Message",
     "MessageRole",
     "MockBackend",
+    "OpenAIBackend",
     "Orchestrator",
     "ScriptedBackend",
     "Step",
     "Task",
+    "Tool",
     "Workflow",
     "WorkflowEngine",
     # Built-in agents

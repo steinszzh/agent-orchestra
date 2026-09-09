@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Status](https://img.shields.io/badge/status-hobby%2F%23-lightgrey)
-![Tests](https://img.shields.io/badge/tests-30%2B%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-49%20passed-brightgreen)
 
 一个轻量级、**零依赖**的多智能体编排框架，用 Python 实现。
 
@@ -46,10 +46,11 @@
 
 其他亮点：
 - 🧠 **共享记忆（Blackboard）**：所有智能体共享线程安全的上下文与消息历史
-- 🔌 **LLM 后端抽象**：`MockBackend` / `ScriptedBackend` / 自定义（OpenAI、Anthropic…）
+- 🔌 **LLM 后端抽象**：内置 `MockBackend` / `ScriptedBackend` / `OpenAIBackend`（OpenAI 兼容，可接 DeepSeek、SiliconFlow、Ollama）
+- 🛠️ **工具调用（Tool use）**：智能体可通过 `TOOL_CALL` 协议调用自定义工具，结果自动回填
 - 🏷️ **能力声明**：智能体声明 `AgentCapability`，路由器据此匹配
 - ⚡ **并发执行**：基于线程池的并行调度 + `asyncio` 异步包装
-- 🧪 **完整测试**：30+ 单元测试，覆盖所有模式
+- 🧪 **完整测试**：49 个单元测试，覆盖所有模式
 
 ---
 
@@ -65,7 +66,14 @@ pip install -e ".[test]"
 无需安装即可直接运行：
 
 ```bash
-python examples/demo.py
+python agent_orchestra/examples/demo.py
+```
+
+安装后可用控制台命令：
+
+```bash
+pip install -e ".[openai]"   # 需要真实 LLM 时安装 openai 后端依赖
+agent-orchestra-demo
 ```
 
 ---
@@ -176,7 +184,7 @@ Routed to: analyst
   DONE — all patterns executed successfully ✅
 ```
 
-> 完整运行：`python examples/demo.py`（无需 API Key，30 秒内完成）
+> 完整运行：`python agent_orchestra/examples/demo.py` 或安装后执行 `agent-orchestra-demo`（无需 API Key，30 秒内完成）
 
 ---
 
@@ -187,14 +195,14 @@ agent_orchestra/
 ├── core/
 │   ├── message.py        # Message, Task, MessageRole — 通信协议
 │   ├── memory.py         # Memory — 线程安全的共享黑板
-│   ├── llm.py            # LLMBackend, MockBackend, ScriptedBackend
-│   ├── agent.py          # Agent 基类, AgentCapability
+│   ├── llm.py            # LLMBackend, MockBackend, ScriptedBackend, OpenAIBackend
+│   ├── agent.py          # Agent 基类, AgentCapability, Tool
 │   ├── orchestrator.py   # Orchestrator — 5 种编排模式
 │   └── workflow.py       # Workflow, Step, WorkflowEngine — DAG 引擎
 ├── agents/
 │   └── builtin.py        # 7 个内置智能体 + 工厂函数
 ├── examples/
-│   └── demo.py           # 全模式演示
+│   └── demo.py           # 全模式演示（安装后可用 agent-orchestra-demo）
 └── tests/
     └── test_orchestra.py # 单元测试
 ```
@@ -203,7 +211,8 @@ agent_orchestra/
 
 - **Message** — 智能体间通信的原子单元，含 `role`/`sender`/`recipient`/`metadata`
 - **Task** — 待分派的工作单元，可转换为 Message
-- **Agent** — 拥有角色、系统提示词、能力声明和 LLM 后端；实现 `process(message) -> message`
+- **Agent** — 拥有角色、系统提示词、能力声明和 LLM 后端；实现 `process(message) -> message`，可挂载 `Tool`
+- **Tool** — 可调用能力：智能体输出 `TOOL_CALL` 标记，框架执行工具并回填结果
 - **Orchestrator** — 注册中心 + 调度器，管理共享记忆，提供 5 种编排模式
 - **Workflow** — 声明式 DAG，`WorkflowEngine` 按拓扑序并发执行
 
@@ -236,6 +245,8 @@ agent_orchestra/
 | `LLMBackend` | `core.llm` | 所有 LLM 后端必须实现的抽象接口。 |
 | `MockBackend` | `core.llm` | 确定性、基于关键词的后端，用于离线演示和测试。 |
 | `ScriptedBackend` | `core.llm` | 按顺序返回预定义响应，用于单元测试。 |
+| `OpenAIBackend` | `core.llm` | OpenAI 兼容后端，可接 OpenAI / DeepSeek / SiliconFlow / Ollama。 |
+| `Tool` | `core.agent` | 可调用能力：智能体输出 `TOOL_CALL` 标记即触发执行。 |
 | `Orchestrator` | `core.orchestrator` | 注册中心 + 调度器，提供 5 种编排模式。 |
 | `Workflow` | `core.workflow` | 声明式 DAG，通过 `WorkflowEngine` 执行。 |
 | `WorkflowEngine` | `core.workflow` | 按拓扑序并发执行 `Workflow`。 |
@@ -303,33 +314,42 @@ class LLMBackend(ABC):
 
 ## 🔌 接入真实 LLM
 
-实现 `LLMBackend` 接口即可：
+内置 OpenAI 兼容后端 `OpenAIBackend`，只需换后端即可接入真实模型：
 
 ```python
-from agent_orchestra import LLMBackend
+from agent_orchestra import Orchestrator, OpenAIBackend, create_default_team
 
-class OpenAIBackend(LLMBackend):
-    def __init__(self, api_key: str, model: str = "gpt-4o"):
-        from openai import OpenAI
-        self.client = OpenAI(api_key=api_key)
-        self.model = model
+backend = OpenAIBackend(
+    api_key="sk-...",
+    base_url="https://api.deepseek.com/v1",   # OpenAI / DeepSeek / SiliconFlow / Ollama
+    model="deepseek-chat",
+)
 
-    def generate(self, prompt, *, system_prompt="", **kwargs):
-        resp = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-        )
-        return resp.choices[0].message.content
-
-# 使用：
-from agent_orchestra import Orchestrator, create_default_team
-backend = OpenAIBackend(api_key="sk-...")
 orch = Orchestrator(llm=backend)
 orch.register_many(*create_default_team(llm=backend))
 ```
+
+### 使用工具（Tool use）
+
+给智能体挂载自定义工具，通过 `TOOL_CALL` 协议调用：
+
+```python
+from agent_orchestra import Agent, Tool
+
+def get_weather(city: str) -> str:
+    return f"{city}: 24°C, sunny"
+
+agent = Agent(
+    name="Assistant",
+    role="assistant",
+    llm=backend,
+    tools=[Tool(name="get_weather", description="查询天气", function=get_weather)],
+)
+```
+
+智能体在回答中输出 `TOOL_CALL: get_weather({"city": "Shanghai"})`，框架会自动执行并把结果回填到下一轮 LLM 上下文。
+
+实现自定义后端时，实现 `LLMBackend` 接口即可（`generate(prompt, *, system_prompt, **kwargs) -> str`）。
 
 ---
 

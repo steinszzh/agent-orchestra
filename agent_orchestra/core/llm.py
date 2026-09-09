@@ -7,7 +7,6 @@ code.
 """
 from __future__ import annotations
 
-import hashlib
 import re
 from abc import ABC, abstractmethod
 from typing import Any, Optional
@@ -166,5 +165,73 @@ class ScriptedBackend(LLMBackend):
         return r
 
 
-def _hash_seed(text: str) -> int:
-    return int(hashlib.md5(text.encode()).hexdigest(), 16)  # noqa: S324
+class OpenAIBackend(LLMBackend):
+    """OpenAI-compatible chat-completions backend.
+
+    Works with OpenAI, DeepSeek, SiliconFlow, Ollama (OpenAI mode), and any
+    other provider exposing the ``/chat/completions`` API: point ``base_url``
+    at the provider and pass a valid ``api_key`` (some providers accept a
+    placeholder like ``"sk-xxx"`` or ``"ollama"``).
+
+    Requires the optional ``openai`` package::
+
+        pip install "agent-orchestra[openai]"
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        base_url: str = "https://api.openai.com/v1",
+        model: str = "gpt-4o-mini",
+        timeout: float = 60.0,
+        **client_kwargs: Any,
+    ) -> None:
+        """Initialise the backend.
+
+        Args:
+            api_key: API key for the provider.
+            base_url: Provider base URL (``…/v1``).
+            model: Model name to use for completions.
+            timeout: Request timeout in seconds.
+            **client_kwargs: Extra kwargs forwarded to the OpenAI client
+                (e.g. ``max_retries``).
+        """
+        self.api_key = api_key
+        self.base_url = base_url
+        self.model = model
+        self._timeout = timeout
+        self._client_kwargs = client_kwargs
+        self._client = None
+
+    def _get_client(self) -> Any:
+        """Lazily build the OpenAI client (imported on first use)."""
+        if self._client is None:
+            try:
+                from openai import OpenAI
+            except ImportError as exc:  # pragma: no cover - env dependent
+                raise ImportError(
+                    "OpenAIBackend requires the 'openai' package. "
+                    "Install it with: pip install 'agent-orchestra[openai]'"
+                ) from exc
+            self._client = OpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                timeout=self._timeout,
+                **self._client_kwargs,
+            )
+        return self._client
+
+    def generate(self, prompt: str, *, system_prompt: str = "", **kwargs: Any) -> str:
+        client = self._get_client()
+        messages: list[dict[str, str]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        allowed = {"temperature", "max_tokens", "top_p", "stop", "stream"}
+        params: dict[str, Any] = {"model": self.model, "messages": messages}
+        params.update({k: v for k, v in kwargs.items() if k in allowed})
+
+        resp = client.chat.completions.create(**params)
+        return resp.choices[0].message.content or ""

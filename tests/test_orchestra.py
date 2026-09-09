@@ -26,10 +26,12 @@ from agent_orchestra import (  # noqa: E402
     Message,
     MessageRole,
     MockBackend,
+    OpenAIBackend,
     Orchestrator,
     ScriptedBackend,
     Step,
     Task,
+    Tool,
     Workflow,
     WorkflowEngine,
     create_default_team,
@@ -350,6 +352,167 @@ class TestWorkflow:
         wf = Workflow("t").step("a", "researcher")
         with pytest.raises(KeyError):
             engine.run(wf, Task("x"))
+
+
+# ---------------------------------------------------------------------------
+# Tool calling
+# ---------------------------------------------------------------------------
+class TestToolCalling:
+    def test_tool_executed_and_result_fed_back(self):
+        calls: list[str] = []
+
+        def echo(text: str) -> str:
+            calls.append(text)
+            return f"echo:{text}"
+
+        agent = Agent(
+            name="Assistant",
+            role="assistant",
+            tools=[
+                Tool(
+                    name="echo",
+                    description="echo text",
+                    function=echo,
+                    parameters={"text": {"type": "string"}},
+                )
+            ],
+            llm=ScriptedBackend(
+                [
+                    'TOOL_CALL: echo({"text": "hello tool"})',
+                    "The tool said: hello tool",
+                ]
+            ),
+        )
+        resp = agent.process(Message(content="use the tool", sender="user"))
+        assert calls == ["hello tool"]
+        assert "hello tool" in resp.content
+
+    def test_no_tool_call_returns_directly(self):
+        agent = Agent(
+            name="Assistant",
+            role="assistant",
+            llm=ScriptedBackend(["plain answer"]),
+        )
+        resp = agent.process(Message(content="hi", sender="user"))
+        assert resp.content == "plain answer"
+
+    def test_parse_tool_calls(self):
+        assert Agent._parse_tool_calls('TOOL_CALL: foo({"a": 1})') == [("foo", {"a": 1})]
+        assert Agent._parse_tool_calls("no calls here") == []
+        assert Agent._parse_tool_calls('TOOL_CALL: foo({"broken")') == []
+        assert Agent._parse_tool_calls('TOOL_CALL: foo({"a": "b"}) TOOL_CALL: bar({"c": 2})') == [
+            ("foo", {"a": "b"}),
+            ("bar", {"c": 2}),
+        ]
+
+    def test_unknown_tool_reported(self):
+        results = Agent(
+            name="Assistant", role="assistant"
+        )._execute_tools([("nope", {"a": 1})])
+        assert "unknown tool" in results[0]
+
+    def test_tool_error_surfaced(self):
+        def boom() -> str:
+            raise ValueError("bad thing")
+
+        agent = Agent(
+            name="Assistant",
+            role="assistant",
+            tools=[Tool(name="boom", description="boom", function=boom)],
+        )
+        results = agent._execute_tools([("boom", {})])
+        assert "ERROR" in results[0] and "bad thing" in results[0]
+
+    def test_max_tool_rounds_capped(self):
+        backend = ScriptedBackend(['TOOL_CALL: echo({"text": "x"})'] * 10)
+        agent = Agent(
+            name="Assistant",
+            role="assistant",
+            max_tool_rounds=2,
+            tools=[Tool(name="echo", description="echo", function=lambda text: text)],
+            llm=backend,
+        )
+        agent.process(Message(content="x", sender="user"))
+        # Loop runs max_tool_rounds+1 = 3 times regardless of scripted backlog.
+        assert backend._idx == 3
+
+    def test_tools_advertised_in_default_system_prompt(self):
+        agent = Agent(
+            name="Assistant",
+            role="assistant",
+            tools=[Tool(name="echo", description="echo text", function=lambda text: text)],
+        )
+        assert "echo" in agent.system_prompt
+        assert "TOOL_CALL" in agent.system_prompt
+
+
+# ---------------------------------------------------------------------------
+# Capability routing (regression for the `or True` bug)
+# ---------------------------------------------------------------------------
+class TestCapabilityRouting:
+    def test_can_handle_respects_capabilities(self):
+        agent = Agent(
+            name="Coder",
+            role="software engineer",
+            capabilities=[AgentCapability("code", "write code", ["python", "debug"])],
+        )
+        assert agent.can_handle(Task("debug a python bug"))
+        assert not agent.can_handle(Task("write a blog post"))
+
+    def test_no_capabilities_handles_anything(self):
+        agent = Agent(name="Plain", role="assistant")
+        assert agent.can_handle(Task("anything"))
+
+    def test_router_fallback_respects_capabilities(self):
+        # Regression: can_handle used to return True always, so the router
+        # fallback always picked the first candidate. Now a task that only
+        # the coder can handle must route to the coder.
+        orch = Orchestrator()
+        orch.register_many(
+            Agent(
+                "Writer",
+                "content writer",
+                capabilities=[AgentCapability("write", "draft", ["write", "blog"])],
+            ),
+            Agent(
+                "Coder",
+                "software engineer",
+                capabilities=[AgentCapability("code", "write code", ["python", "debug"])],
+            ),
+        )
+        orch.register(Agent("Router", "task router", llm=ScriptedBackend(["garbage output"])))
+        msg = orch.run_router(
+            Task("debug a python function"),
+            router_agent="router",
+            candidate_ids=["writer", "coder"],
+        )
+        assert msg.sender == "coder"
+
+
+# ---------------------------------------------------------------------------
+# OpenAIBackend
+# ---------------------------------------------------------------------------
+class TestOpenAIBackend:
+    def test_constructs_without_openai_installed(self):
+        backend = OpenAIBackend(
+            api_key="sk-test",
+            base_url="https://api.deepseek.com/v1",
+            model="deepseek-chat",
+        )
+        assert backend.model == "deepseek-chat"
+        assert backend.base_url == "https://api.deepseek.com/v1"
+
+    def test_missing_openai_raises_clear_error(self, monkeypatch):
+        backend = OpenAIBackend(api_key="sk-test")
+
+        def fake_import(name, *args, **kwargs):
+            if name == "openai":
+                raise ImportError("No module named 'openai'")
+            return __import__(name, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.__import__", fake_import)
+        with pytest.raises(ImportError, match=r"agent-orchestra\[openai\]"):
+            backend.generate("hi")
 
 
 # ---------------------------------------------------------------------------
