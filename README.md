@@ -353,6 +353,41 @@ agent = Agent(
 
 ---
 
+## 🌐 HTTP API 服务（server/）
+
+把框架包装成 REST API：提交任务 + 选择编排模式，返回结构化 JSON（各智能体输出 + 耗时）。
+
+```bash
+pip install -r server/requirements.txt
+uvicorn server.app:app --reload        # http://127.0.0.1:8000
+```
+
+端点：
+- `GET /health` — 健康检查 + 支持的编排模式
+- `GET /v1/modes` — 各模式说明（能力发现）
+- `POST /v1/run` — 执行一次编排
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/run \
+  -H 'Content-Type: application/json' \
+  -d '{"task":"比较 RAG 与微调，给一个 500 篇文档的内部知识库选型建议",
+       "mode":"debate","agent_ids":["analyst","researcher"],"rounds":1}'
+```
+
+设计要点：
+- **结构化输出**：Pydantic 请求/响应模型，API 边界无自由文本解析
+- **请求隔离**：每次 run 新建 Orchestrator + Memory，并发请求互不共享黑板状态
+- **默认离线确定**：MockBackend 无需 API Key 即可跑通；设 `LLM_API_KEY`（可选 `LLM_BASE_URL`/`LLM_MODEL`）并传 `use_live_model=true` 即切换真实模型（OpenAI 兼容协议，可接 DeepSeek/Ollama）
+- **错误结构化**：未知模式/智能体/依赖图错误映射为 4xx JSON，不崩服务
+
+测试（13 个用例，离线确定）：
+
+```bash
+python -m pytest server/tests/ -v
+```
+
+---
+
 ## 🧪 测试
 
 ```bash
